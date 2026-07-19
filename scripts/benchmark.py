@@ -149,6 +149,8 @@ def main() -> None:
     parser.add_argument("--seeds", type=int, default=1)
     parser.add_argument("--eval-every", type=int, default=None)
     parser.add_argument("--out", default="results")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="reuse result files from interrupted batches instead of re-running")
     args = parser.parse_args()
 
     if args.experiments:
@@ -167,10 +169,16 @@ def main() -> None:
     summary: dict[str, dict] = {}
     for name in names:
         print(f"[{name}] {args.env} x {args.steps} steps x {args.seeds} seeds")
-        finals = [
-            run_one(name, args.env, args.steps, seed, eval_every, out_dir)
-            for seed in range(args.seeds)
-        ]
+        finals = []
+        for seed in range(args.seeds):
+            out_file = out_dir / f"{name}_seed{seed}.json"
+            if args.skip_existing and out_file.exists():
+                record = json.loads(out_file.read_text())
+                if record.get("steps") == args.steps:
+                    print(f"  {name} seed {seed}: {record['final_return']:9.1f}  (cached)")
+                    finals.append(record["final_return"])
+                    continue
+            finals.append(run_one(name, args.env, args.steps, seed, eval_every, out_dir))
         summary[name] = {
             "mean": statistics.mean(finals),
             "std": statistics.stdev(finals) if len(finals) > 1 else 0.0,
