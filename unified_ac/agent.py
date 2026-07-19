@@ -97,6 +97,7 @@ class UnifiedActorCritic:
         rollout: RolloutBuffer,
         epochs: int = 1,
         minibatch_size: int | None = None,
+        normalize_adv: bool = False,
     ) -> dict[str, float]:
         cfg = self.cfg
         if cfg.data != "rollout":
@@ -116,9 +117,14 @@ class UnifiedActorCritic:
                 c_loss.backward()
                 self.critic_opt.step()
 
+                psi = mb.adv
+                if normalize_adv:
+                    # per-minibatch standardization (CleanRL PPO's norm_adv);
+                    # a training detail, not an objective dial
+                    psi = (psi - psi.mean()) / (psi.std() + 1e-8)
                 a_loss, a_metrics = actor_loss(
                     self.actor, cfg, mb.obs,
-                    act=mb.act, psi=mb.adv, anchor_log_prob=mb.anchor_log_prob,
+                    act=mb.act, psi=psi, anchor_log_prob=mb.anchor_log_prob,
                 )
                 self.actor_opt.zero_grad()
                 a_loss.backward()

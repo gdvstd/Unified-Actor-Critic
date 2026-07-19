@@ -38,9 +38,9 @@ def run(preset: str, seeds: int, steps: int, env_id: str) -> None:
         cfg = factory()
         kwargs = REPLAY_KWARGS if cfg.data == "replay" else ROLLOUT_KWARGS
         start = time.time()
-        agent, ret = train(env_id, cfg, total_steps=steps, seed=seed, **kwargs)
+        result = train(env_id, cfg, total_steps=steps, seed=seed, **kwargs)
         # a steadier final estimate than the single eval inside train()
-        ret = evaluate(make_env(env_id, seed + 1000), agent, episodes=10)
+        ret = evaluate(make_env(env_id, seed + 1000), result.agent, episodes=10)
         returns.append(ret)
         print(f"  seed {seed}: return {ret:8.1f}  ({time.time() - start:.0f}s)")
     mean = statistics.mean(returns)

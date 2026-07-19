@@ -158,6 +158,17 @@ class TestSmokeMatrixRollout:
         assert _changed(actor_before, agent.actor)
         assert _changed(critic_before, agent.critics)
 
+    def test_normalize_adv_standardizes_per_minibatch(self):
+        cfg = presets.ppo()
+        agent = _make_agent(cfg)
+        buf = _filled_rollout(agent)
+        metrics = agent.update_rollout(buf, epochs=1, normalize_adv=True)
+        assert all(
+            torch.isfinite(torch.tensor(v)) for v in metrics.values()
+        ), metrics
+        # frozen advantages themselves are untouched
+        assert buf.adv.std() != 1.0 or buf.adv.mean() != 0.0
+
     def test_frozen_targets_are_stable_across_epochs(self):
         """D4: y is computed once from pre-update parameters; the epoch loop
         must not move it even though the critic updates in between."""

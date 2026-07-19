@@ -185,10 +185,31 @@ TD3 actor loss matches CleanRL's only after substituting min for Q₁ in the ref
 (one-line change in the harness, per D2); everything else matches verbatim.
 Curve-level (scripted, §8).
 
-**Phase 5 — the payoff.** Interior-point experiments (the searchable space between
-rows), B1 deadly-triad demonstration run (replay+direct, hedges ablated one by one —
-the paper's predicted instability, logged not enforced), README with the toggle table
-and a "recover SAC in 5 lines" example.
+**Phase 5 — the payoff: benchmark validation of the interior.** Two tiers with
+distinct roles. **Smoke tier (Pendulum-v1):** the full experiment matrix at short
+horizons, screening for NaN/divergence/config bugs only — Pendulum has no
+discriminative power (everything solves it, hedge effects don't manifest), so its
+numbers are never evidence. **Evidence tier (Gymnasium MuJoCo v5: Hopper,
+HalfCheetah, Walker2d):** where the paper's claims are actually tested — 100-300k
+steps × 3 seeds for relative comparisons, 1M × 5 seeds for headline configs later.
+The matrix, each row validating a specific claim:
+- named presets (baseline rows of the recovery table);
+- **TD3+η** (stochastic TD3) and **SAC+ρ** — B3's testable prediction: if smoothing
+  under a stochastic policy is redundant, SAC+ρ must not outperform SAC;
+- **DDPG hedge decomposition** (DDPG → +M=2 only → +ρ only → TD3) — which hedge
+  carries the deadly-triad protection; doubles as the B1 demonstration;
+- **α interpolation** (α ∈ {0, 0.1, 0.3, 1} on the SAC frame) — the deterministic
+  boundary as a continuous limit, read off a performance curve;
+- **PPO λ sweep** (λ ∈ {0, 0.5, 0.95, 1}) — the bootstrap-depth dial on-policy.
+Infrastructure: periodic-eval logging in train() (learning curves, not just final
+returns), `scripts/benchmark.py` with the experiment registry and JSON results.
+
+**Phase 6 / backlog.** Offline RL as the pessimism extreme (paper Appendix A):
+train_offline() (Collect step removed), logged-buffer datasets first, then Minari;
+CQL(H) toggle as an additional critic hedge; the B4 substitution experiment
+(pessimism vs query restriction as substitutes). Also: η auto-tuning (D7),
+vectorized collection, IQL (outside the actor toggles — needs a third consumption
+mode).
 
 ## 8. Validation harness
 

@@ -6,12 +6,20 @@ bounds. Single-environment v1 — vectorized collection is backlog.
 
 from __future__ import annotations
 
+from typing import Callable, NamedTuple
+
 import gymnasium as gym
 import torch
 
 from unified_ac.agent import UnifiedActorCritic
 from unified_ac.buffers import ReplayBuffer, RolloutBuffer
 from unified_ac.config import UnifiedConfig
+
+
+class TrainResult(NamedTuple):
+    agent: UnifiedActorCritic
+    final_return: float
+    history: list[tuple[int, float]]  # (env_step, eval_return)
 
 
 def make_env(env_id: str, seed: int | None = None) -> gym.Env:
@@ -47,6 +55,7 @@ def train_replay(
     learning_starts: int = 1000,
     batch_size: int = 256,
     buffer_capacity: int = 100_000,
+    step_hook: Callable[[int], None] | None = None,
 ) -> ReplayBuffer:
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0]
@@ -67,6 +76,8 @@ def train_replay(
             obs, _ = env.reset()
         if step >= learning_starts:
             agent.update_replay(buffer.sample(batch_size))
+        if step_hook is not None:
+            step_hook(step + 1)
     return buffer
 
 
@@ -77,12 +88,15 @@ def train_rollout(
     rollout_length: int = 2048,
     epochs: int = 10,
     minibatch_size: int = 64,
+    normalize_adv: bool = False,
+    step_hook: Callable[[int], None] | None = None,
 ) -> RolloutBuffer:
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0]
     buffer = RolloutBuffer(rollout_length, obs_dim, act_dim)
 
     obs, _ = env.reset()
+    step = 0
     for _ in range(iterations):
         buffer.clear()
         while not buffer.full:
@@ -99,7 +113,13 @@ def train_rollout(
             obs = next_obs
             if terminated or truncated:
                 obs, _ = env.reset()
-        agent.update_rollout(buffer, epochs=epochs, minibatch_size=minibatch_size)
+            step += 1
+            if step_hook is not None:
+                step_hook(step)
+        agent.update_rollout(
+            buffer, epochs=epochs, minibatch_size=minibatch_size,
+            normalize_adv=normalize_adv,
+        )
     return buffer
 
 
@@ -109,20 +129,40 @@ def train(
     total_steps: int,
     seed: int = 0,
     hidden: tuple[int, ...] = (256, 256),
+    eval_every: int | None = None,
+    eval_episodes: int = 5,
     **kwargs,
-) -> tuple[UnifiedActorCritic, float]:
-    """Convenience entry: build env + agent, train per regime, return final eval."""
+) -> TrainResult:
+    """Convenience entry: build env + agent, train per regime, evaluate.
+
+    eval_every records (step, eval_return) into the history — the learning
+    curve the benchmark harness consumes.
+    """
     torch.manual_seed(seed)
     env = make_env(env_id, seed)
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0]
     agent = UnifiedActorCritic(cfg, obs_dim, act_dim, hidden=hidden)
 
+    history: list[tuple[int, float]] = []
+    step_hook = None
+    if eval_every is not None:
+        eval_env = make_env(env_id, seed + 999)
+
+        def step_hook(step: int) -> None:
+            if step % eval_every == 0:
+                history.append((step, evaluate(eval_env, agent, eval_episodes)))
+
     if cfg.data == "replay":
-        train_replay(env, agent, total_steps, **kwargs)
+        train_replay(env, agent, total_steps, step_hook=step_hook, **kwargs)
     else:
         rollout_length = kwargs.pop("rollout_length", 2048)
         iterations = max(1, total_steps // rollout_length)
-        train_rollout(env, agent, iterations, rollout_length=rollout_length, **kwargs)
+        train_rollout(
+            env, agent, iterations, rollout_length=rollout_length,
+            step_hook=step_hook, **kwargs,
+        )
 
-    return agent, evaluate(env, agent)
+    final = evaluate(env, agent, eval_episodes)
+    history.append((total_steps, final))
+    return TrainResult(agent, final, history)
